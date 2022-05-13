@@ -1,0 +1,303 @@
+---
+title: "LPA Blog Post Series"
+author: "Matthew Schell"
+date: "4/29/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Libraries and Loading Data
+```{r}
+library(tidyverse)
+library(tidyLPA)
+library(lavaan)
+library(psych)
+library(labelled)
+library(ggthemes)
+library(Hmisc)
+composite_mean_maker <- function(x, ...){
+    out <- dplyr::select(x, ...)
+    out <- apply(out, 1, function(x) mean(x, na.rm = T))
+    out[is.nan(out)] <- NA
+    return(out)
+}
+
+fin_data <- read_csv("C:/Users/schel/My Drive/Personal/Blog/Data/National Financial Well-Being Survey/NFWBS_PUF_2016_data.csv")
+```
+
+#Cleaning and processing data
+```{r}
+#Recoding financial well-being reverse coded items
+fin_data$FWB1_3_re <- car::recode(fin_data$FWB1_3, "1 = 5; 2 = 4; 4 = 2; 5 = 1")
+fin_data$FWB1_5_re <- car::recode(fin_data$FWB1_5, "1 = 5; 2 = 4; 4 = 2; 5 = 1")
+fin_data$FWB1_6_re <- car::recode(fin_data$FWB1_6, "1 = 5; 2 = 4; 4 = 2; 5 = 1")
+
+#Recoding missing values to NA
+fin_data[fin_data == -1] <- NA
+fin_data[fin_data == -4] <- NA    
+```
+
+
+# Creating compsites to use in LPA (financial well being, financial skills, managing personal finances, and financial knowledge)
+```{r}
+#CFA and alpha for financial well-being
+finwb.model <- ' 
+finwb =~ FWB1_1 + FWB1_2 + FWB1_3_re + FWB1_4 + FWB1_5_re + FWB1_6 _re
+'
+finwb.fit <- cfa(finwb.model, data = fin_data, missing = "fiml", estimator = "ML")
+summary(finwb.fit, fit.measures = TRUE, standardized = TRUE)
+mod_finwb <- arrange(modificationindices(finwb.fit), desc(mi))
+
+#Above model does not fit well, so taking out reverse coded items instead of adding covariances to make model fit better
+ 
+finwb.model2 <- ' 
+finwb =~ FWB1_1 + FWB1_2 + FWB1_4
+'
+finwb.fit2 <- cfa(finwb.model2, data = fin_data, missing = "fiml", estimator = "ML")
+summary(finwb.fit2, fit.measures = TRUE, standardized = TRUE)
+
+a2 <- psych::alpha(fin_data[c('FWB1_1',  'FWB1_2', 'FWB1_4')])
+summary(a2)
+
+describe(fin_data[c('FWB1_1',  'FWB1_2', 'FWB1_4')])
+
+################################################################
+
+#CFA and alpha for financial skills
+finsk.model <- ' 
+finsk =~ FS1_1 + FS1_2 + FS1_3 + FS1_4 + FS1_5 + FS1_6 + FS1_7
+'
+finsk.fit <- cfa(finsk.model, data = fin_data, missing = "fiml", estimator = "ML")
+summary(finsk.fit, fit.measures = TRUE, standardized = TRUE)
+mod_finsk <- arrange(modificationindices(finsk.fit), desc(mi))
+
+a2 <- psych::alpha(fin_data[c('FS1_1',  'FS1_2', 'FS1_3',  'FS1_4',  'FS1_5',  'FS1_6',  'FS1_7')])
+summary(a2)
+
+describe(fin_data[c('FS1_1',  'FS1_2', 'FS1_3',  'FS1_4',  'FS1_5',  'FS1_6',  'FS1_7')])
+
+#CFA does not fit great, I would normally do some more measurement work to see what the issue is.
+
+##################################################################
+
+#CFA and alpha for managing personal finances
+perfin.model <- ' 
+perfin =~ MANAGE1_1 + MANAGE1_2 + MANAGE1_3 + MANAGE1_4
+'
+perfin.fit <- cfa(perfin.model, data = fin_data, missing = "fiml", estimator = "ML")
+summary(perfin.fit, fit.measures = TRUE, standardized = TRUE)
+mod_finsk <- arrange(modificationindices(perfin.fit), desc(mi))
+
+a3 <- psych::alpha(fin_data[c('MANAGE1_1', 'MANAGE1_2', 'MANAGE1_3', 'MANAGE1_4')])
+summary(a3)
+
+describe(fin_data[c('MANAGE1_1', 'MANAGE1_2', 'MANAGE1_3', 'MANAGE1_4')])
+
+##################################################################
+
+#CFA and alpha for creating a financial plan
+finplan.model <- ' 
+finplan =~ PROPPLAN_1 + PROPPLAN_2 + PROPPLAN_3 + PROPPLAN_4
+'
+finplan.fit <- cfa(finplan.model, data = fin_data, missing = "fiml", estimator = "ML")
+summary(finplan.fit, fit.measures = TRUE, standardized = TRUE)
+mod_finsk <- arrange(modificationindices(finplan.fit), desc(mi))
+
+a3 <- psych::alpha(fin_data[c('PROPPLAN_1', 'PROPPLAN_2', 'PROPPLAN_3', 'PROPPLAN_4')])
+summary(a3)
+
+describe(fin_data[c('PROPPLAN_1', 'PROPPLAN_2', 'PROPPLAN_3', 'PROPPLAN_4')])
+
+##################################################################
+
+#Making composite variables to use as LPA indicators
+fin_data$fin_wb <- composite_mean_maker(fin_data, FWB1_1, FWB1_2, FWB1_4)
+fin_data$fin_sk <- composite_mean_maker(fin_data, FS1_1, FS1_2, FS1_3, FS1_4, FS1_5, FS1_6, FS1_7)
+fin_data$per_fin <- composite_mean_maker(fin_data, MANAGE1_1, MANAGE1_2, MANAGE1_3, MANAGE1_4)
+fin_data$fin_plan <- composite_mean_maker(fin_data, PROPPLAN_1, PROPPLAN_2, PROPPLAN_3, PROPPLAN_4)
+
+psych::describe(fin_data[c("fin_wb", "fin_sk", "per_fin", "fin_plan")])
+
+cor_df <- select(fin_data, fin_wb, fin_sk, per_fin, fin_plan)
+rcorr(as.matrix(cor_df), type = "pearson")
+```
+
+#Latent Profile Analysis
+```{r}
+#Equal variances and covariances set to zero
+profile_data <- select(fin_data, fin_wb, fin_sk, per_fin, fin_plan)
+profile_data <- single_imputation(profile_data)
+
+model1 <- estimate_profiles(profile_data, 
+                  n_profiles = 2:8, 
+                  variances = "equal",
+                  covariances = "zero",
+                  package = "mclust")
+
+#Evaluating fit statistics and estimates
+fit1 <- get_fit(model1)
+get_estimates(model1)
+get_data(model1)
+
+compare_solutions(model1, statistics = c("BIC", "AIC", "BLRT_val", "BLRT_p"))
+ggplot(fit1, aes(x = Classes, y = BIC)) +
+    geom_line()
+
+m1p4 <- get_estimates(model1[[3]])
+m1p5 <- get_estimates(model1[[4]])
+m1p6 <- get_estimates(model1[[5]])
+m1p7 <- get_estimates(model1[[6]])
+
+
+
+
+#Graphing candidate models
+filter(m1p4, Category == "Means") %>% 
+ggplot(aes(x = Class, y = Estimate)) +
+    geom_col(aes(fill = Parameter), position = "dodge") +
+    labs(x = "", y = "") +
+    theme_minimal() +
+    scale_fill_ptol(name = "", labels = c("Financial Planning", "Financial Skill", "Financial Well-being", "Personal Finance Knowledge")) +
+    ggtitle("Personal Finance Profiles") + 
+    theme(plot.title = element_text(hjust = 0.5)) +
+    scale_x_continuous(breaks = c(1, 2, 3, 4), labels = c("Profile 1", "Profile 2", "Profile 3", "Profile 4"))
+
+filter(m1p5, Category == "Means") %>% 
+ggplot(aes(x = Class, y = Estimate)) +
+    geom_col(aes(fill = Parameter), position = "dodge") +
+    labs(x = "", y = "") +
+    theme_minimal() +
+    scale_fill_ptol(name = "", labels = c("Financial Planning", "Financial Skill", "Financial Well-being", "Personal Finance Knowledge")) +
+    ggtitle("Personal Finance Profiles") + 
+    theme(plot.title = element_text(hjust = 0.5)) +
+    scale_x_continuous(breaks = c(1, 2, 3, 4, 5), labels = c("Profile 1", "Profile 2", "Profile 3", "Profile 4", "Profile 5"))
+
+filter(m1p6, Category == "Means") %>% 
+ggplot(aes(x = Class, y = Estimate)) +
+    geom_col(aes(fill = Parameter), position = "dodge") +
+    labs(x = "", y = "") +
+    theme_minimal() +
+    scale_fill_ptol(name = "", labels = c("Financial Planning", "Financial Skill", "Financial Well-being", "Personal Finance Knowledge")) +
+    ggtitle("Personal Finance Profiles") + 
+    theme(plot.title = element_text(hjust = 0.5)) +
+    scale_x_continuous(breaks = c(1, 2, 3, 4, 5, 6), labels = c("Profile 1", "Profile 2", "Profile 3", "Profile 4", "Profile 5", "Profile 6"))
+
+filter(m1p7, Category == "Means") %>% 
+ggplot(aes(x = Class, y = Estimate)) +
+    geom_col(aes(fill = Parameter), position = "dodge") +
+    labs(x = "", y = "") +
+    theme_minimal() +
+    scale_fill_ptol(name = "", labels = c("Financial Planning", "Financial Skill", "Financial Well-being", "Personal Finance Knowledge")) +
+    ggtitle("Personal Finance Profiles") + 
+    theme(plot.title = element_text(hjust = 0.5)) +
+    scale_x_continuous(breaks = c(1, 2, 3, 4, 5, 6, 7), labels = c("Profile 1", "Profile 2", "Profile 3", "Profile 4", "Profile 5", "Profile 6", "Profile 7"))
+   
+
+###########################################################################
+
+#Equal variances and equal covariances
+model2 <- estimate_profiles(profile_data, 
+                  n_profiles = 2:8, 
+                  variances = "equal",
+                  covariances = "equal",
+                  package = "mclust")
+
+#Evaluating fit statistics and estimates
+fit2 <- get_fit(model2)
+
+ggplot(fit2, aes(x = Classes, y = BIC)) +
+    geom_line()
+compare_solutions(model2, statistics = c("BIC", "AIC", "BLRT_val", "BLRT_p"))
+
+m2p3 <- get_estimates(model2[[2]])
+m2p5 <- get_estimates(model2[[4]])
+
+#Graphing candidate models
+filter(m2p3, Category == "Means") %>% 
+ggplot(aes(x = Class, y = Estimate)) +
+    geom_col(aes(fill = Parameter), position = "dodge") +
+    labs(x = "", y = "") +
+    theme_minimal() +
+    scale_fill_ptol(name = "", labels = c("Financial Planning", "Financial Skill", "Financial Well-being", "Personal Finance Knowledge")) +
+    ggtitle("Personal Finance Profiles") + 
+    theme(plot.title = element_text(hjust = 0.5)) +
+    scale_x_continuous(breaks = c(1, 2, 3), labels = c("Profile 1\nn = 4008", "Profile 2\nn = 400", "Profile 3\nn = 1986"))
+
+ggsave("lpa_profiles_m2p3.png", width = 250, units = "mm", dpi = 300)
+
+filter(m2p5, Category == "Means") %>% 
+ggplot(aes(x = Class, y = Estimate)) +
+    geom_col(aes(fill = Parameter), position = "dodge") +
+    labs(x = "", y = "Survey Scale (1 - 5)") +
+    theme_minimal() +
+    scale_fill_ptol(name = "", labels = c("Financial Planning", "Financial Skill", "Financial Well-being", "Personal Finance Knowledge")) +
+    ggtitle("Personal Finance Profiles") + 
+    theme(plot.title = element_text(hjust = 0.5),
+          axis.title = element_text(size = 10)) +
+    scale_x_continuous(breaks = c(1, 2, 3, 4, 5), labels = c("Profile 1\nn = 2067", "Profile 2\nn = 391", "Profile 3\nn = 3188", "Profile 4\nn = 548", "Profile 5\nn = 200"))
+
+ggsave("lpa_profiles_m2p5.png", width = 250, units = "mm", dpi = 300)
+
+###########################################################################
+
+#SELECTED SOLUTION: 5 PROFILE SOLUTION WITH EQUAL VARIANCES AND EQUAL COVARIANCES
+
+#Checking number of individuals in each profile
+
+m2p5_class <- model2[["model_3_class_5"]][["dff"]][["Class"]]
+profile_n <- c(sum(m2p5_class == 1), sum(m2p5_class == 2), sum(m2p5_class == 3), sum(m2p5_class == 4), sum(m2p5_class == 5))
+profile_name <- c("Profile 1", "Profile 2", "Profile 3", "Profile 4", "Profile 5")
+profile_mem <- tibble(profile_name, profile_n)
+
+m2p3_class <- model2[["model_3_class_3"]][["dff"]][["Class"]]
+profile_n_c3 <- c(sum(m2p3_class == 1), sum(m2p3_class == 2), sum(m2p3_class == 3))
+profile_name_c3 <- c("Profile 1", "Profile 2", "Profile 3")
+profile_mem <- tibble(profile_name_c3, profile_n_c3)
+```
+
+#Checking Profile Differences with MANOVAs
+```{r}
+#Preparing dataset
+m2_data <- get_data(model2)
+man_df <- filter(m2_data, classes_number == 5 & Class_prob == 1)
+man_df$Class <- as.factor(man_df$Class)
+
+#Overall manova model, summary of this model tells you if overall model is significant (i.e. if there is any difference among groups on a linear combination of the dependent variables)
+model.man <- manova(cbind(fin_wb, fin_sk, fin_plan, per_fin) ~ Class, data = man_df)
+summary(model.man, test = "Wilks")
+eta_squared(model.man)
+
+#This model tells you if there are significant difference between ANY group
+summary.aov(model.man)
+
+#These ANOVAS complete pairwise comparisons between all groups using the indicated personal financial indicator.
+model.fin_wb <- aov(man_df$fin_wb ~ Class, data = man_df)
+summary(model.fin_wb)
+tukey.fin_wb <- TukeyHSD(model.fin_wb)
+tukey.fin_wb
+
+model.fin_sk <- aov(man_df$fin_sk ~ Class, data = man_df)
+summary(model.fin_sk)
+tukey.fin_sk <- TukeyHSD(model.fin_sk)
+tukey.fin_sk
+
+model.fin_plan <- aov(man_df$fin_plan ~ Class, data = man_df)
+summary(model.fin_plan)
+tukey.fin_plan <- TukeyHSD(model.fin_plan)
+tukey.fin_plan
+
+model.per_fin <- aov(man_df$per_fin ~ Class, data = man_df)
+summary(model.per_fin)
+tukey.per_fin <- TukeyHSD(model.per_fin)
+tukey.per_fin
+
+#Calculating estimated marginal means for each financial indicator
+emmeans(model.fin_wb, "Class")
+emmeans(model.fin_sk, "Class")
+emmeans(model.fin_plan, "Class")
+emmeans(model.per_fin, "Class")
+```
+
